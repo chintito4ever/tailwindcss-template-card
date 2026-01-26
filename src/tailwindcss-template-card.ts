@@ -398,6 +398,10 @@ export class TailwindTemplateCard extends LitElement {
     if (changedProperties.has('hass')) {
       this._applyHassToContent();
     }
+
+    if (changedProperties.has('_config') || changedProperties.has('hass')) {
+      this._setupCardActions();
+    }
   }
 
   /**
