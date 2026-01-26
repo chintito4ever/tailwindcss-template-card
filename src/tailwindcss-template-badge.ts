@@ -12,6 +12,7 @@ import {
   PropertyValues,
   TemplateResult,
   CSSResultGroup,
+  nothing,
 } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
@@ -27,7 +28,7 @@ import presetAutoprefix from '@twind/preset-autoprefix';
 import type { TailwindTemplateBadgeConfig, Binding } from './types';
 import { CARD_VERSION, DEFAULT_CONFIG } from './const';
 import { TemplateEngine } from './services/template-engine';
-import { actionHandlerBind } from './utils/action-handler';
+import { setActionHandler, removeActionHandler } from './utils/action-binding';
 
 // Register custom element
 declare global {
@@ -79,6 +80,9 @@ export class TailwindTemplateCardBadge extends LitElement implements LovelaceBad
 
   // Debounce timer
   private _debounceTimer?: number;
+
+  private _actionTarget?: HTMLElement;
+  private _actionListener?: (ev: Event) => void;
 
   /**
    * Set badge configuration
@@ -167,6 +171,10 @@ export class TailwindTemplateCardBadge extends LitElement implements LovelaceBad
     if (changedProps.has('_config')) {
       // Re-subscribe on config change
       this._subscribeTemplate();
+    }
+
+    if (changedProps.has('_config') || changedProps.has('_content')) {
+      this._setupBadgeActions();
     }
   }
 
@@ -363,6 +371,50 @@ export class TailwindTemplateCardBadge extends LitElement implements LovelaceBad
       this._observer.disconnect();
       this._observer = undefined;
     }
+
+    if (this._actionTarget) {
+      removeActionHandler(this._actionTarget);
+      if (this._actionListener) {
+        this._actionTarget.removeEventListener('action', this._actionListener);
+      }
+      this._actionTarget = undefined;
+    }
+  }
+
+  private _setupBadgeActions(): void {
+    if (!this.shadowRoot || !this._config) {
+      return;
+    }
+
+    const badge = this.shadowRoot.getElementById('badge-root') as HTMLElement | null;
+    if (!badge) {
+      return;
+    }
+
+    const hasHold = hasAction(this._config.hold_action);
+    const hasDoubleClick = hasAction(this._config.double_tap_action);
+    const hasTap = hasAction(this._config.tap_action);
+    const hasAnyAction = hasTap || hasHold || hasDoubleClick;
+
+    if (this._actionTarget && this._actionTarget !== badge) {
+      removeActionHandler(this._actionTarget);
+      if (this._actionListener) {
+        this._actionTarget.removeEventListener('action', this._actionListener);
+      }
+    }
+
+    this._actionTarget = badge;
+    if (!this._actionListener) {
+      this._actionListener = (ev: Event) => this._handleBadgeAction(ev as CustomEvent);
+    }
+
+    if (hasAnyAction) {
+      setActionHandler(badge, { hasHold, hasDoubleClick });
+      badge.addEventListener('action', this._actionListener);
+    } else {
+      removeActionHandler(badge);
+      badge.removeEventListener('action', this._actionListener);
+    }
   }
 
   /**
@@ -385,15 +437,17 @@ export class TailwindTemplateCardBadge extends LitElement implements LovelaceBad
       `;
     }
 
+    const hasBadgeAction =
+      hasAction(this._config.tap_action) ||
+      hasAction(this._config.hold_action) ||
+      hasAction(this._config.double_tap_action);
+
     return html`
       <div
+        id="badge-root"
         class="badge-container"
         @click="${this._handleContentAction}"
-        @action="${this._handleBadgeAction}"
-        .actionHandler="${actionHandlerBind({
-          hasHold: hasAction(this._config.hold_action),
-          hasDoubleClick: hasAction(this._config.double_tap_action),
-        })}"
+        tabindex=${hasBadgeAction ? '0' : nothing}
       >
         ${unsafeHTML(this._content)}
       </div>
