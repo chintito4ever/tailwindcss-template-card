@@ -266,9 +266,7 @@ export class TailwindTemplateCard extends LitElement {
         template: this._config.content,
       });
       if (!result || typeof result.result !== 'string') {
-        console.warn('Template rendering failed: empty result, using raw content.');
-        this._handleTemplateResult(this._config.content);
-        return;
+        throw new Error('Template rendering failed: empty result');
       }
       this._handleTemplateResult(result.result);
     } catch (error) {
@@ -402,6 +400,10 @@ export class TailwindTemplateCard extends LitElement {
 
     if (changedProperties.has('hass')) {
       this._applyHassToContent();
+    }
+
+    if (changedProperties.has('_config') || changedProperties.has('hass')) {
+      this._setupCardActions();
     }
   }
 

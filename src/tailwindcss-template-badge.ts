@@ -175,11 +175,6 @@ export class TailwindTemplateCardBadge extends LitElement implements LovelaceBad
 
     if (changedProps.has('_config') || changedProps.has('_content')) {
       this._setupBadgeActions();
-      this._applyHassToContent();
-    }
-
-    if (changedProps.has('hass')) {
-      this._applyHassToContent();
     }
   }
 
