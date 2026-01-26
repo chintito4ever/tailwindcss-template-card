@@ -267,6 +267,23 @@ export class TailwindTemplateCardBadge extends LitElement implements LovelaceBad
     }, debounce);
   }
 
+  private _applyHassToContent(): void {
+    if (!this.shadowRoot || !this.hass) {
+      return;
+    }
+
+    const container = this.shadowRoot.getElementById('badge-root');
+    if (!container) {
+      return;
+    }
+
+    container
+      .querySelectorAll('ha-icon, ha-state-icon, ha-svg-icon, ha-icon-button')
+      .forEach((element) => {
+        (element as any).hass = this.hass;
+      });
+  }
+
   /**
    * Sanitize HTML content
    */

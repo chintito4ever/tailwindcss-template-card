@@ -388,6 +388,15 @@ export class TailwindTemplateCard extends LitElement {
     if (changedProperties.has('_renderedContent')) {
       this._applyBindings();
       this._setupActionHandlers();
+      this._applyHassToContent();
+    }
+
+    if (changedProperties.has('_config') || changedProperties.has('hass')) {
+      this._setupCardActions();
+    }
+
+    if (changedProperties.has('hass')) {
+      this._applyHassToContent();
     }
 
     if (changedProperties.has('_config') || changedProperties.has('hass')) {
@@ -479,6 +488,19 @@ export class TailwindTemplateCard extends LitElement {
         }
       });
     });
+  }
+
+  private _applyHassToContent(): void {
+    if (!this.shadowRoot || !this.hass) return;
+
+    const container = this.shadowRoot.querySelector('.content');
+    if (!container) return;
+
+    container
+      .querySelectorAll('ha-icon, ha-state-icon, ha-svg-icon, ha-icon-button')
+      .forEach((element) => {
+        (element as any).hass = this.hass;
+      });
   }
 
   /**
