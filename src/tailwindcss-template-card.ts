@@ -261,10 +261,13 @@ export class TailwindTemplateCard extends LitElement {
     if (!this._config?.content || !this.hass) return;
 
     try {
-      const result = await this.hass.callWS<{ result: string }>({
+      const result = await this.hass.callWS<{ result: string } | null>({
         type: 'render_template',
         template: this._config.content,
       });
+      if (!result || typeof result.result !== 'string') {
+        throw new Error('Template rendering failed: empty result');
+      }
       this._handleTemplateResult(result.result);
     } catch (error) {
       console.error('Template rendering failed:', error);
