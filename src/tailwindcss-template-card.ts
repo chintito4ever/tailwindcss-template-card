@@ -28,7 +28,7 @@ import type { TailwindTemplateCardConfig, Action, Binding } from './types';
 import { CARD_VERSION, DEFAULT_CONFIG, SECTIONS_SIZING } from './const';
 import { TemplateEngine } from './services/template-engine';
 import { CameraCapabilities } from './services/camera-capabilities';
-import { actionHandler } from './utils/action-handler';
+import { setActionHandler, removeActionHandler } from './utils/action-binding';
 
 // Register the card info for Home Assistant
 console.info(
@@ -88,6 +88,9 @@ export class TailwindTemplateCard extends LitElement {
 
   // Debounce timeout for rendering
   private _renderDebounceTimeout?: number;
+
+  private _actionTarget?: HTMLElement;
+  private _actionListener?: (ev: Event) => void;
 
   /**
    * Static method to provide card sizing metadata for Sections dashboard
@@ -167,6 +170,14 @@ export class TailwindTemplateCard extends LitElement {
     if (this._renderDebounceTimeout) {
       clearTimeout(this._renderDebounceTimeout);
       this._renderDebounceTimeout = undefined;
+    }
+
+    if (this._actionTarget) {
+      removeActionHandler(this._actionTarget);
+      if (this._actionListener) {
+        this._actionTarget.removeEventListener('action', this._actionListener);
+      }
+      this._actionTarget = undefined;
     }
   }
 
@@ -250,10 +261,13 @@ export class TailwindTemplateCard extends LitElement {
     if (!this._config?.content || !this.hass) return;
 
     try {
-      const result = await this.hass.callWS<{ result: string }>({
+      const result = await this.hass.callWS<{ result: string } | null>({
         type: 'render_template',
         template: this._config.content,
       });
+      if (!result || typeof result.result !== 'string') {
+        throw new Error('Template rendering failed: empty result');
+      }
       this._handleTemplateResult(result.result);
     } catch (error) {
       console.error('Template rendering failed:', error);
@@ -377,6 +391,15 @@ export class TailwindTemplateCard extends LitElement {
     if (changedProperties.has('_renderedContent')) {
       this._applyBindings();
       this._setupActionHandlers();
+      this._applyHassToContent();
+    }
+
+    if (changedProperties.has('_config') || changedProperties.has('hass')) {
+      this._setupCardActions();
+    }
+
+    if (changedProperties.has('hass')) {
+      this._applyHassToContent();
     }
   }
 
@@ -466,6 +489,19 @@ export class TailwindTemplateCard extends LitElement {
     });
   }
 
+  private _applyHassToContent(): void {
+    if (!this.shadowRoot || !this.hass) return;
+
+    const container = this.shadowRoot.querySelector('.content');
+    if (!container) return;
+
+    container
+      .querySelectorAll('ha-icon, ha-state-icon, ha-svg-icon, ha-icon-button')
+      .forEach((element) => {
+        (element as any).hass = this.hass;
+      });
+  }
+
   /**
    * Resolve a binding value
    */
@@ -552,6 +588,42 @@ export class TailwindTemplateCard extends LitElement {
 
     // Handle legacy actions from config
     this._setupLegacyActions(container);
+  }
+
+  private _setupCardActions(): void {
+    if (!this.shadowRoot || !this._config) {
+      return;
+    }
+
+    const card = this.shadowRoot.getElementById('root') as HTMLElement | null;
+    if (!card) {
+      return;
+    }
+
+    const hasHold = hasAction(this._config.hold_action);
+    const hasDoubleClick = hasAction(this._config.double_tap_action);
+    const hasTap = hasAction(this._config.tap_action);
+    const hasAnyAction = hasTap || hasHold || hasDoubleClick;
+
+    if (this._actionTarget && this._actionTarget !== card) {
+      removeActionHandler(this._actionTarget);
+      if (this._actionListener) {
+        this._actionTarget.removeEventListener('action', this._actionListener);
+      }
+    }
+
+    this._actionTarget = card;
+    if (!this._actionListener) {
+      this._actionListener = (ev: Event) => this._handleCardAction(ev as ActionHandlerEvent);
+    }
+
+    if (hasAnyAction) {
+      setActionHandler(card, { hasHold, hasDoubleClick });
+      card.addEventListener('action', this._actionListener);
+    } else {
+      removeActionHandler(card);
+      card.removeEventListener('action', this._actionListener);
+    }
   }
 
   /**
@@ -674,14 +746,7 @@ export class TailwindTemplateCard extends LitElement {
                          hasAction(this._config.double_tap_action);
 
     return html`
-      <ha-card
-        @action=${this._handleCardAction}
-        .actionHandler=${hasCardAction ? actionHandler({
-          hasHold: hasAction(this._config.hold_action),
-          hasDoubleClick: hasAction(this._config.double_tap_action),
-        }) : nothing}
-        tabindex=${hasCardAction ? '0' : nothing}
-      >
+      <ha-card id="root" tabindex=${hasCardAction ? '0' : nothing}>
         <div
           class="content"
           .innerHTML=${this._renderedContent}
