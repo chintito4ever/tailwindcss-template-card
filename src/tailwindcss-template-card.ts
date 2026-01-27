@@ -266,7 +266,8 @@ export class TailwindTemplateCard extends LitElement {
         template: this._config.content,
       });
       if (!result || typeof result.result !== 'string') {
-        throw new Error('Template rendering failed: empty result');
+        console.warn('Template rendering returned empty result, keeping previous content.');
+        return;
       }
       this._handleTemplateResult(result.result);
     } catch (error) {
