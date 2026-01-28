@@ -553,7 +553,7 @@ export class TailwindTemplateCard extends LitElement {
     // Find elements with data-ha-action
     const actionElements = container.querySelectorAll('[data-ha-action]');
     actionElements.forEach((element) => {
-      const actionType = element.getAttribute('data-ha-action');
+      const haAction = element.getAttribute('data-ha-action');
       const entityId = element.getAttribute('data-entity');
       const actionConfigStr = element.getAttribute('data-action-config');
 
@@ -564,6 +564,14 @@ export class TailwindTemplateCard extends LitElement {
         } catch {
           console.warn('Invalid action config:', actionConfigStr);
         }
+      }
+      if (!actionConfig && haAction) {
+        actionConfig = { action: haAction, entity: entityId || this._config?.entity };
+      } else if (actionConfig && haAction && !('action' in actionConfig)) {
+        actionConfig = { ...actionConfig, action: haAction, entity: entityId || this._config?.entity };
+      }
+      if (actionConfig?.action === 'none') {
+        return;
       }
 
       // Add action handler directive
