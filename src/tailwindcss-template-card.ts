@@ -266,7 +266,8 @@ export class TailwindTemplateCard extends LitElement {
         template: this._config.content,
       });
       if (!result || typeof result.result !== 'string') {
-        throw new Error('Template rendering failed: empty result');
+        console.warn('Template rendering returned empty result, keeping previous content.');
+        return;
       }
       this._handleTemplateResult(result.result);
     } catch (error) {
@@ -309,7 +310,8 @@ export class TailwindTemplateCard extends LitElement {
         'thead', 'tbody', 'tfoot', 'button', 'input', 'select', 'option',
         'label', 'form', 'video', 'audio', 'source', 'iframe', 'svg',
         'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'text',
-        'g', 'defs', 'use', 'symbol', 'ha-icon', 'ha-card', 'ha-icon-button',
+        'g', 'defs', 'use', 'symbol', 'ha-icon', 'ha-state-icon', 'ha-svg-icon',
+        'ha-card', 'ha-icon-button',
       ],
       ALLOWED_ATTR: [
         'class', 'style', 'id', 'src', 'href', 'alt', 'title', 'width',
@@ -318,7 +320,7 @@ export class TailwindTemplateCard extends LitElement {
         'data-ha-action', 'data-entity', 'data-action-config',
         'd', 'viewBox', 'fill', 'stroke', 'stroke-width', 'cx', 'cy',
         'r', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'points', 'transform',
-        'icon',
+        'icon', 'state', 'entity',
       ],
       FORBID_TAGS: ['script', 'style'],
       FORBID_ATTR: ['onclick', 'onload', 'onerror', 'onmouseover', 'onfocus'],
@@ -551,7 +553,7 @@ export class TailwindTemplateCard extends LitElement {
     // Find elements with data-ha-action
     const actionElements = container.querySelectorAll('[data-ha-action]');
     actionElements.forEach((element) => {
-      const actionType = element.getAttribute('data-ha-action');
+      const haAction = element.getAttribute('data-ha-action');
       const entityId = element.getAttribute('data-entity');
       const actionConfigStr = element.getAttribute('data-action-config');
 
@@ -562,6 +564,14 @@ export class TailwindTemplateCard extends LitElement {
         } catch {
           console.warn('Invalid action config:', actionConfigStr);
         }
+      }
+      if (!actionConfig && haAction) {
+        actionConfig = { action: haAction, entity: entityId || this._config?.entity };
+      } else if (actionConfig && haAction && !('action' in actionConfig)) {
+        actionConfig = { ...actionConfig, action: haAction, entity: entityId || this._config?.entity };
+      }
+      if (actionConfig?.action === 'none') {
+        return;
       }
 
       // Add action handler directive
