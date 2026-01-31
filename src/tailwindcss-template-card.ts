@@ -92,17 +92,7 @@ export class TailwindTemplateCard extends LitElement {
 
   private _actionTarget?: HTMLElement;
   private _actionListener?: (ev: Event) => void;
-  private _delegatedActionTarget?: HTMLElement;
-  private _delegatedActionHandlers?: {
-    click: (ev: Event) => void;
-    dblclick: (ev: Event) => void;
-    keydown: (ev: KeyboardEvent) => void;
-    pointerdown: (ev: PointerEvent) => void;
-    pointerup: (ev: PointerEvent) => void;
-    pointercancel: (ev: PointerEvent) => void;
-  };
-  private _holdTimer?: number;
-  private _suppressNextClick = false;
+  private _entityActionListeners = new WeakMap<HTMLElement, (ev: Event) => void>();
 
   private _detectedEntities: string[] = [];
   private _lastDetectedContent?: string;
@@ -214,6 +204,26 @@ export class TailwindTemplateCard extends LitElement {
       clearTimeout(this._holdTimer);
       this._holdTimer = undefined;
     }
+  }
+
+  private _updateDetectedEntities(): void {
+    if (!this._config) {
+      return;
+    }
+
+    const autoDetect = this._config.auto_detect_entities !== false;
+    const content = this._config.content || '';
+
+    if (
+      this._lastDetectedContent === content &&
+      this._lastAutoDetectSetting === autoDetect
+    ) {
+      return;
+    }
+
+    this._lastDetectedContent = content;
+    this._lastAutoDetectSetting = autoDetect;
+    this._detectedEntities = autoDetect ? extractEntitiesFromContent(content) : [];
   }
 
   private _updateDetectedEntities(): void {
@@ -691,9 +701,7 @@ export class TailwindTemplateCard extends LitElement {
 
     const target = this._getEventTargetElement(ev);
     const actionNode = target?.closest?.('[data-ha-action], [data-entity]') as HTMLElement | null;
-    const domEntity = actionNode?.closest?.('[data-entity]')?.getAttribute('data-entity') ?? undefined;
-    const fallbackEntity = this._resolveFallbackEntity(domEntity);
-    const entity = domEntity ?? fallbackEntity;
+    const entity = actionNode?.closest?.('[data-entity]')?.getAttribute('data-entity') ?? undefined;
     const haActionNode = actionNode?.closest?.('[data-ha-action]') as HTMLElement | null;
     const haAction = haActionNode?.getAttribute('data-ha-action') ?? undefined;
     const actionConfigStr = haActionNode?.getAttribute('data-action-config');
@@ -739,28 +747,6 @@ export class TailwindTemplateCard extends LitElement {
           : actionConfig.double_tap_action;
 
     if (!hasAction(actionToCheck)) {
-      if (this._config.debug) {
-        console.debug('Action dispatch skipped (no action)', {
-          clicked: target,
-          actionNode,
-          entity,
-          actionConfig: actionToCheck,
-          actionType,
-        });
-      }
-      return false;
-    }
-
-    if (this._requiresEntity(actionToCheck) && !entity) {
-      if (this._config.debug) {
-        console.debug('Action dispatch skipped (missing entity)', {
-          clicked: target,
-          actionNode,
-          entity,
-          actionConfig: actionToCheck,
-          actionType,
-        });
-      }
       return false;
     }
 
@@ -776,40 +762,6 @@ export class TailwindTemplateCard extends LitElement {
 
     handleAction(this, this.hass, actionConfig, actionType);
     return true;
-  }
-
-  private _resolveFallbackEntity(domEntity?: string): string | undefined {
-    if (domEntity) {
-      return domEntity;
-    }
-    if (this._config.default_entity) {
-      return this._config.default_entity;
-    }
-
-    const entityActions = this._config.entity_actions || {};
-    const keys = Object.keys(entityActions);
-    if (keys.length === 1) {
-      return keys[0];
-    }
-
-    if (this._config.debug && keys.length > 1) {
-      console.debug('Action dispatch skipped (ambiguous entity_actions)', {
-        entityActions: keys,
-      });
-    }
-
-    return this._config.entity;
-  }
-
-  private _requiresEntity(actionConfig?: Record<string, unknown>): boolean {
-    if (!actionConfig || typeof actionConfig !== 'object') {
-      return false;
-    }
-    const action = actionConfig.action;
-    if (typeof action !== 'string') {
-      return false;
-    }
-    return ['more-info', 'toggle', 'call-service', 'perform-action'].includes(action);
   }
 
   private _getEventTargetElement(ev: Event): HTMLElement | null {
@@ -909,6 +861,129 @@ export class TailwindTemplateCard extends LitElement {
       element.removeAttribute('data-entity');
       element.removeAttribute('data-auto-entity');
     }
+  }
+
+  private _setupEntityActionBindings(): void {
+    if (!this.shadowRoot || !this.hass || !this._config) {
+      return;
+    }
+
+    const container = this.shadowRoot.querySelector('.content');
+    if (!container) return;
+
+    if (this._config.auto_bind_entity_actions === false) {
+      container
+        .querySelectorAll<HTMLElement>('[data-auto-entity-action]')
+        .forEach((element) => this._removeAutoEntityAction(element));
+      return;
+    }
+
+    const entityActions = this._config.entity_actions || {};
+    const actionElements = container.querySelectorAll<HTMLElement>('[data-entity]');
+
+    actionElements.forEach((element) => {
+      if (element.hasAttribute('data-ha-action')) {
+        this._removeAutoEntityAction(element);
+        return;
+      }
+
+      const entityId = element.getAttribute('data-entity');
+      if (!entityId) {
+        this._removeAutoEntityAction(element);
+        return;
+      }
+
+      const actionConfig = entityActions[entityId];
+      const hasTap = hasAction(actionConfig?.tap_action);
+      const hasHold = hasAction(actionConfig?.hold_action);
+      const hasDoubleClick = hasAction(actionConfig?.double_tap_action);
+      const hasAnyAction = hasTap || hasHold || hasDoubleClick;
+
+      if (!hasAnyAction) {
+        this._removeAutoEntityAction(element);
+        return;
+      }
+
+      this._applyAutoEntityAttributes(element);
+      setActionHandler(element, { hasHold, hasDoubleClick });
+
+      if (!this._entityActionListeners.has(element)) {
+        const listener = (ev: Event): void => {
+          const actionEvent = ev as ActionHandlerEvent;
+          actionEvent.stopPropagation();
+          const currentEntityId = element.getAttribute('data-entity');
+          if (!currentEntityId || !this.hass || !this._config) {
+            return;
+          }
+          const currentAction = this._config.entity_actions?.[currentEntityId];
+          if (!currentAction) {
+            return;
+          }
+
+          const actionType = actionEvent.detail.action;
+          if (actionType === 'tap' && !hasAction(currentAction.tap_action)) {
+            return;
+          }
+          if (actionType === 'hold' && !hasAction(currentAction.hold_action)) {
+            return;
+          }
+          if (actionType === 'double_tap' && !hasAction(currentAction.double_tap_action)) {
+            return;
+          }
+
+          handleAction(
+            this,
+            this.hass,
+            {
+              entity: currentEntityId,
+              tap_action: currentAction.tap_action,
+              hold_action: currentAction.hold_action,
+              double_tap_action: currentAction.double_tap_action,
+            },
+            actionEvent.detail.action!
+          );
+        };
+        element.addEventListener('action', listener);
+        this._entityActionListeners.set(element, listener);
+      }
+    });
+  }
+
+  private _applyAutoEntityAttributes(element: HTMLElement): void {
+    element.classList.add('auto-entity-action');
+    element.setAttribute('data-auto-entity-action', 'true');
+    if (!element.hasAttribute('role')) {
+      element.setAttribute('role', 'button');
+      element.setAttribute('data-auto-entity-role', 'true');
+    }
+    if (!element.hasAttribute('tabindex')) {
+      element.setAttribute('tabindex', '0');
+      element.setAttribute('data-auto-entity-tabindex', 'true');
+    }
+  }
+
+  private _removeAutoEntityAction(element: HTMLElement): void {
+    if (element.hasAttribute('data-auto-entity-action')) {
+      element.classList.remove('auto-entity-action');
+      element.removeAttribute('data-auto-entity-action');
+
+      if (element.hasAttribute('data-auto-entity-role')) {
+        element.removeAttribute('role');
+        element.removeAttribute('data-auto-entity-role');
+      }
+      if (element.hasAttribute('data-auto-entity-tabindex')) {
+        element.removeAttribute('tabindex');
+        element.removeAttribute('data-auto-entity-tabindex');
+      }
+    }
+
+    const listener = this._entityActionListeners.get(element);
+    if (listener) {
+      element.removeEventListener('action', listener);
+      this._entityActionListeners.delete(element);
+    }
+
+    removeActionHandler(element);
   }
 
   private _setupCardActions(): void {
