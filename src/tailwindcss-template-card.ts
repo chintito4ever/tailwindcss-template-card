@@ -649,14 +649,21 @@ export class TailwindTemplateCard extends LitElement {
     }
 
     const entityActions = this._config.entity_actions || {};
-    const boundElements = new Set<HTMLElement>();
+    const actionElements = container.querySelectorAll<HTMLElement>('[data-entity]');
 
-    const bindElement = (element: HTMLElement, entityId: string, actionConfig: typeof entityActions[string]) => {
+    actionElements.forEach((element) => {
       if (element.hasAttribute('data-ha-action')) {
         this._removeAutoEntityAction(element);
         return;
       }
 
+      const entityId = element.getAttribute('data-entity');
+      if (!entityId) {
+        this._removeAutoEntityAction(element);
+        return;
+      }
+
+      const actionConfig = entityActions[entityId];
       const hasTap = hasAction(actionConfig?.tap_action);
       const hasHold = hasAction(actionConfig?.hold_action);
       const hasDoubleClick = hasAction(actionConfig?.double_tap_action);
@@ -665,11 +672,6 @@ export class TailwindTemplateCard extends LitElement {
       if (!hasAnyAction) {
         this._removeAutoEntityAction(element);
         return;
-      }
-
-      if (!element.getAttribute('data-entity')) {
-        element.setAttribute('data-entity', entityId);
-        element.setAttribute('data-auto-entity', 'true');
       }
 
       this._applyAutoEntityAttributes(element);
@@ -714,38 +716,6 @@ export class TailwindTemplateCard extends LitElement {
         element.addEventListener('action', listener);
         this._entityActionListeners.set(element, listener);
       }
-    };
-
-    const actionElements = container.querySelectorAll<HTMLElement>('[data-entity]');
-    actionElements.forEach((element) => {
-      const entityId = element.getAttribute('data-entity');
-      if (!entityId) {
-        this._removeAutoEntityAction(element);
-        return;
-      }
-
-      const actionConfig = entityActions[entityId];
-      if (!actionConfig) {
-        this._removeAutoEntityAction(element);
-        return;
-      }
-
-      bindElement(element, entityId, actionConfig);
-      boundElements.add(element);
-    });
-
-    Object.entries(entityActions).forEach(([entityId, actionConfig]) => {
-      if (!actionConfig?.selector) {
-        return;
-      }
-
-      container.querySelectorAll<HTMLElement>(actionConfig.selector).forEach((element) => {
-        if (boundElements.has(element)) {
-          return;
-        }
-        bindElement(element, entityId, actionConfig);
-        boundElements.add(element);
-      });
     });
   }
 
@@ -775,11 +745,6 @@ export class TailwindTemplateCard extends LitElement {
         element.removeAttribute('tabindex');
         element.removeAttribute('data-auto-entity-tabindex');
       }
-    }
-
-    if (element.getAttribute('data-auto-entity') === 'true') {
-      element.removeAttribute('data-entity');
-      element.removeAttribute('data-auto-entity');
     }
 
     const listener = this._entityActionListeners.get(element);

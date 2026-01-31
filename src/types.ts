@@ -155,7 +155,6 @@ export interface TailwindTemplateCardConfig extends LovelaceCardConfig {
     tap_action?: ActionConfig;
     hold_action?: ActionConfig;
     double_tap_action?: ActionConfig;
-    selector?: string;
   }>;
   
   // Standard HA actions
