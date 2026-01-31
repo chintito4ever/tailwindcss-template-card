@@ -29,6 +29,7 @@ import { CARD_VERSION, DEFAULT_CONFIG, SECTIONS_SIZING } from './const';
 import { TemplateEngine } from './services/template-engine';
 import { CameraCapabilities } from './services/camera-capabilities';
 import { setActionHandler, removeActionHandler } from './utils/action-binding';
+import { extractEntitiesFromContent } from './utils/entity-extractor';
 
 // Register the card info for Home Assistant
 console.info(
@@ -91,6 +92,21 @@ export class TailwindTemplateCard extends LitElement {
 
   private _actionTarget?: HTMLElement;
   private _actionListener?: (ev: Event) => void;
+  private _delegatedActionTarget?: HTMLElement;
+  private _delegatedActionHandlers?: {
+    click: (ev: Event) => void;
+    dblclick: (ev: Event) => void;
+    keydown: (ev: KeyboardEvent) => void;
+    pointerdown: (ev: PointerEvent) => void;
+    pointerup: (ev: PointerEvent) => void;
+    pointercancel: (ev: PointerEvent) => void;
+  };
+  private _holdTimer?: number;
+  private _suppressNextClick = false;
+
+  private _detectedEntities: string[] = [];
+  private _lastDetectedContent?: string;
+  private _lastAutoDetectSetting?: boolean;
 
   /**
    * Static method to provide card sizing metadata for Sections dashboard
@@ -133,6 +149,8 @@ export class TailwindTemplateCard extends LitElement {
       hold_action: config.hold_action || { action: 'none' },
       double_tap_action: config.double_tap_action || { action: 'none' },
     };
+
+    this._updateDetectedEntities();
 
     // Initialize services if hass is available
     if (this.hass) {
@@ -179,6 +197,43 @@ export class TailwindTemplateCard extends LitElement {
       }
       this._actionTarget = undefined;
     }
+
+    if (this._delegatedActionTarget && this._delegatedActionHandlers) {
+      const target = this._delegatedActionTarget;
+      const handlers = this._delegatedActionHandlers;
+      target.removeEventListener('click', handlers.click);
+      target.removeEventListener('dblclick', handlers.dblclick);
+      target.removeEventListener('keydown', handlers.keydown);
+      target.removeEventListener('pointerdown', handlers.pointerdown);
+      target.removeEventListener('pointerup', handlers.pointerup);
+      target.removeEventListener('pointercancel', handlers.pointercancel);
+      this._delegatedActionTarget = undefined;
+      this._delegatedActionHandlers = undefined;
+    }
+    if (this._holdTimer) {
+      clearTimeout(this._holdTimer);
+      this._holdTimer = undefined;
+    }
+  }
+
+  private _updateDetectedEntities(): void {
+    if (!this._config) {
+      return;
+    }
+
+    const autoDetect = this._config.auto_detect_entities !== false;
+    const content = this._config.content || '';
+
+    if (
+      this._lastDetectedContent === content &&
+      this._lastAutoDetectSetting === autoDetect
+    ) {
+      return;
+    }
+
+    this._lastDetectedContent = content;
+    this._lastAutoDetectSetting = autoDetect;
+    this._detectedEntities = autoDetect ? extractEntitiesFromContent(content) : [];
   }
 
   /**
@@ -344,14 +399,8 @@ export class TailwindTemplateCard extends LitElement {
     }
 
     // Auto-detect entities mentioned in content
-    if (this._config?.content && this.hass?.states) {
-      const content = this._config.content;
-      Object.keys(this.hass.states).forEach((entityId) => {
-        if (content.includes(entityId)) {
-          entities.add(entityId);
-        }
-      });
-    }
+    this._updateDetectedEntities();
+    this._detectedEntities.forEach((entityId) => entities.add(entityId));
 
     // Add entities from bindings
     if (this._config?.bindings) {
@@ -364,6 +413,11 @@ export class TailwindTemplateCard extends LitElement {
           });
         }
       });
+    }
+
+    // Add entities from action mappings
+    if (this._config?.entity_actions) {
+      Object.keys(this._config.entity_actions).forEach((entityId) => entities.add(entityId));
     }
 
     return Array.from(entities);
@@ -393,11 +447,13 @@ export class TailwindTemplateCard extends LitElement {
     if (changedProperties.has('_renderedContent')) {
       this._applyBindings();
       this._setupActionHandlers();
+      this._setupEntityActionBindings();
       this._applyHassToContent();
     }
 
     if (changedProperties.has('_config') || changedProperties.has('hass')) {
       this._setupCardActions();
+      this._setupEntityActionBindings();
     }
 
     if (changedProperties.has('hass')) {
@@ -550,58 +606,251 @@ export class TailwindTemplateCard extends LitElement {
     const container = this.shadowRoot.querySelector('.content');
     if (!container) return;
 
-    // Find elements with data-ha-action
-    const actionElements = container.querySelectorAll('[data-ha-action]');
-    actionElements.forEach((element) => {
-      const haAction = element.getAttribute('data-ha-action');
-      const entityId = element.getAttribute('data-entity');
-      const actionConfigStr = element.getAttribute('data-action-config');
+    if (this._delegatedActionTarget !== container) {
+      if (this._delegatedActionTarget && this._delegatedActionHandlers) {
+        const target = this._delegatedActionTarget;
+        const handlers = this._delegatedActionHandlers;
+        target.removeEventListener('click', handlers.click);
+        target.removeEventListener('dblclick', handlers.dblclick);
+        target.removeEventListener('keydown', handlers.keydown);
+        target.removeEventListener('pointerdown', handlers.pointerdown);
+        target.removeEventListener('pointerup', handlers.pointerup);
+        target.removeEventListener('pointercancel', handlers.pointercancel);
+      }
 
-      let actionConfig: ActionHandlerEvent['detail']['action'] | undefined;
-      if (actionConfigStr) {
-        try {
-          actionConfig = JSON.parse(actionConfigStr);
-        } catch {
-          console.warn('Invalid action config:', actionConfigStr);
+      const clickHandler = (ev: Event): void => {
+        if (this._suppressNextClick) {
+          this._suppressNextClick = false;
+          return;
         }
-      }
-      if (!actionConfig && haAction) {
-        actionConfig = { action: haAction, entity: entityId || this._config?.entity };
-      } else if (actionConfig && haAction && !('action' in actionConfig)) {
-        actionConfig = { ...actionConfig, action: haAction, entity: entityId || this._config?.entity };
-      }
-      if (actionConfig?.action === 'none') {
-        return;
-      }
-
-      // Add action handler directive
-      element.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._handleElementAction('tap', entityId, actionConfig);
-      });
-
-      element.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        this._handleElementAction('double_tap', entityId, actionConfig);
-      });
-
-      // Long press handling
-      let pressTimer: number | undefined;
-      element.addEventListener('mousedown', () => {
-        pressTimer = window.setTimeout(() => {
-          this._handleElementAction('hold', entityId, actionConfig);
+        this._dispatchDelegatedAction('tap', ev);
+      };
+      const doubleClickHandler = (ev: Event): void => {
+        this._dispatchDelegatedAction('double_tap', ev);
+      };
+      const keydownHandler = (ev: KeyboardEvent): void => {
+        if (ev.repeat) return;
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          this._dispatchDelegatedAction('tap', ev);
+        }
+      };
+      const pointerdownHandler = (ev: PointerEvent): void => {
+        if (ev.button !== undefined && ev.button !== 0) {
+          return;
+        }
+        if (this._holdTimer) {
+          clearTimeout(this._holdTimer);
+        }
+        this._holdTimer = window.setTimeout(() => {
+          const handled = this._dispatchDelegatedAction('hold', ev);
+          if (handled) {
+            this._suppressNextClick = true;
+          }
         }, 500);
-      });
-      element.addEventListener('mouseup', () => {
-        if (pressTimer) clearTimeout(pressTimer);
-      });
-      element.addEventListener('mouseleave', () => {
-        if (pressTimer) clearTimeout(pressTimer);
-      });
-    });
+      };
+      const pointerupHandler = (): void => {
+        if (this._holdTimer) {
+          clearTimeout(this._holdTimer);
+          this._holdTimer = undefined;
+        }
+      };
+      const pointercancelHandler = (): void => {
+        if (this._holdTimer) {
+          clearTimeout(this._holdTimer);
+          this._holdTimer = undefined;
+        }
+      };
+
+      container.addEventListener('click', clickHandler);
+      container.addEventListener('dblclick', doubleClickHandler);
+      container.addEventListener('keydown', keydownHandler);
+      container.addEventListener('pointerdown', pointerdownHandler);
+      container.addEventListener('pointerup', pointerupHandler);
+      container.addEventListener('pointercancel', pointercancelHandler);
+
+      this._delegatedActionTarget = container;
+      this._delegatedActionHandlers = {
+        click: clickHandler,
+        dblclick: doubleClickHandler,
+        keydown: keydownHandler,
+        pointerdown: pointerdownHandler,
+        pointerup: pointerupHandler,
+        pointercancel: pointercancelHandler,
+      };
+    }
 
     // Handle legacy actions from config
     this._setupLegacyActions(container);
+  }
+
+  private _dispatchDelegatedAction(actionType: 'tap' | 'hold' | 'double_tap', ev: Event): boolean {
+    if (!this.hass || !this._config) {
+      return false;
+    }
+
+    const target = this._getEventTargetElement(ev);
+    const actionNode = target?.closest?.('[data-ha-action], [data-entity]') as HTMLElement | null;
+    const entity = actionNode?.closest?.('[data-entity]')?.getAttribute('data-entity') ?? undefined;
+    const haActionNode = actionNode?.closest?.('[data-ha-action]') as HTMLElement | null;
+    const haAction = haActionNode?.getAttribute('data-ha-action') ?? undefined;
+    const actionConfigStr = haActionNode?.getAttribute('data-action-config');
+
+    const entityActionConfig = entity ? this._config.entity_actions?.[entity] : undefined;
+    const resolvedTap = entityActionConfig?.tap_action ?? this._config.tap_action;
+    const resolvedHold = entityActionConfig?.hold_action ?? this._config.hold_action;
+    const resolvedDouble = entityActionConfig?.double_tap_action ?? this._config.double_tap_action;
+
+    let manualActionConfig: Record<string, unknown> | undefined;
+    if (actionConfigStr) {
+      try {
+        manualActionConfig = JSON.parse(actionConfigStr);
+      } catch {
+        console.warn('Invalid action config:', actionConfigStr);
+      }
+    }
+    if (haAction) {
+      if (!manualActionConfig) {
+        manualActionConfig = { action: haAction };
+      } else if (!('action' in manualActionConfig)) {
+        manualActionConfig = { ...manualActionConfig, action: haAction };
+      }
+      if (entity && !('entity' in manualActionConfig)) {
+        manualActionConfig = { ...manualActionConfig, entity };
+      }
+    }
+
+    const actionConfig = { ...this._config, entity };
+    if (actionType === 'tap') {
+      actionConfig.tap_action = manualActionConfig ?? resolvedTap;
+    } else if (actionType === 'hold') {
+      actionConfig.hold_action = manualActionConfig ?? resolvedHold;
+    } else {
+      actionConfig.double_tap_action = manualActionConfig ?? resolvedDouble;
+    }
+
+    const actionToCheck =
+      actionType === 'tap'
+        ? actionConfig.tap_action
+        : actionType === 'hold'
+          ? actionConfig.hold_action
+          : actionConfig.double_tap_action;
+
+    if (!hasAction(actionToCheck)) {
+      return false;
+    }
+
+    if (this._config.debug) {
+      console.debug('Action dispatch', {
+        clicked: target,
+        actionNode,
+        entity,
+        actionConfig: actionToCheck,
+        actionType,
+      });
+    }
+
+    handleAction(this, this.hass, actionConfig, actionType);
+    return true;
+  }
+
+  private _getEventTargetElement(ev: Event): HTMLElement | null {
+    const path = (ev.composedPath?.() || []) as Array<EventTarget>;
+    for (const entry of path) {
+      if (entry instanceof HTMLElement) {
+        return entry;
+      }
+    }
+    const target = ev.target;
+    return target instanceof HTMLElement ? target : null;
+  }
+
+  private _setupEntityActionBindings(): void {
+    if (!this.shadowRoot || !this.hass || !this._config) {
+      return;
+    }
+
+    const container = this.shadowRoot.querySelector('.content');
+    if (!container) return;
+
+    if (this._config.auto_bind_entity_actions === false) {
+      container
+        .querySelectorAll<HTMLElement>('[data-auto-entity-action]')
+        .forEach((element) => this._removeAutoEntityAction(element));
+      return;
+    }
+
+    const entityActions = this._config.entity_actions || {};
+    const boundElements = new Set<HTMLElement>();
+
+    const applyTarget = (element: HTMLElement, entityId: string) => {
+      if (element.hasAttribute('data-ha-action')) {
+        this._removeAutoEntityAction(element);
+        return;
+      }
+      if (!element.getAttribute('data-entity')) {
+        element.setAttribute('data-entity', entityId);
+        element.setAttribute('data-auto-entity', 'true');
+      }
+      this._applyAutoEntityAttributes(element);
+    };
+
+    container.querySelectorAll<HTMLElement>('[data-entity]').forEach((element) => {
+      const entityId = element.getAttribute('data-entity');
+      if (!entityId || !entityActions[entityId]) {
+        this._removeAutoEntityAction(element);
+        return;
+      }
+      applyTarget(element, entityId);
+      boundElements.add(element);
+    });
+
+    Object.entries(entityActions).forEach(([entityId, actionConfig]) => {
+      if (!actionConfig?.selector) {
+        return;
+      }
+      container.querySelectorAll<HTMLElement>(actionConfig.selector).forEach((element) => {
+        if (boundElements.has(element)) {
+          return;
+        }
+        applyTarget(element, entityId);
+        boundElements.add(element);
+      });
+    });
+  }
+
+  private _applyAutoEntityAttributes(element: HTMLElement): void {
+    element.classList.add('auto-entity-action');
+    element.setAttribute('data-auto-entity-action', 'true');
+    if (!element.hasAttribute('role')) {
+      element.setAttribute('role', 'button');
+      element.setAttribute('data-auto-entity-role', 'true');
+    }
+    if (!element.hasAttribute('tabindex')) {
+      element.setAttribute('tabindex', '0');
+      element.setAttribute('data-auto-entity-tabindex', 'true');
+    }
+  }
+
+  private _removeAutoEntityAction(element: HTMLElement): void {
+    if (element.hasAttribute('data-auto-entity-action')) {
+      element.classList.remove('auto-entity-action');
+      element.removeAttribute('data-auto-entity-action');
+
+      if (element.hasAttribute('data-auto-entity-role')) {
+        element.removeAttribute('role');
+        element.removeAttribute('data-auto-entity-role');
+      }
+      if (element.hasAttribute('data-auto-entity-tabindex')) {
+        element.removeAttribute('tabindex');
+        element.removeAttribute('data-auto-entity-tabindex');
+      }
+    }
+
+    if (element.getAttribute('data-auto-entity') === 'true') {
+      element.removeAttribute('data-entity');
+      element.removeAttribute('data-auto-entity');
+    }
   }
 
   private _setupCardActions(): void {
@@ -783,6 +1032,9 @@ export class TailwindTemplateCard extends LitElement {
       }
       .content {
         padding: var(--spacing, 0);
+      }
+      .content .auto-entity-action {
+        cursor: pointer;
       }
       .error {
         color: var(--error-color, red);
