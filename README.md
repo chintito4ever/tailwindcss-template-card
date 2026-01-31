@@ -79,6 +79,9 @@ content: |
 | `trusted` | boolean | `false` | Allow unsafe HTML (⚠️ use with caution) |
 | `always_update` | boolean | `false` | Re-render on every hass update (legacy) |
 | `debounceChangePeriod` | number | `100` | Debounce delay in milliseconds |
+| `auto_detect_entities` | boolean | `true` | Auto-detect entity IDs in the template |
+| `auto_bind_entity_actions` | boolean | `true` | Auto-bind entity actions to matching elements |
+| `entity_actions` | object | `{}` | Per-entity action mappings |
 | `tap_action` | action | `more-info` | Action on tap |
 | `hold_action` | action | - | Action on hold |
 | `double_tap_action` | action | - | Action on double-tap |
@@ -158,6 +161,35 @@ content: |
     </button>
   </div>
 ```
+
+### Entity Detection & Entity Actions
+
+The card can auto-detect entities referenced in your template (Jinja helpers and HTML attributes)
+and lets you map actions to those entities without editing the HTML. Add `data-entity="entity_id"`
+to mark the clickable element, and the card will bind the action automatically when
+`auto_bind_entity_actions` is enabled. Explicit `data-ha-action` always takes precedence.
+
+```yaml
+auto_detect_entities: true
+auto_bind_entity_actions: true
+entity_actions:
+  switch.moen_water_shutoff_valve:
+    tap_action:
+      action: toggle
+  sensor.droplet_flow_rate:
+    tap_action:
+      action: more-info
+content: |
+  <div class="flex items-center gap-2">
+    <span data-entity="sensor.droplet_flow_rate">Flow</span>
+    <button data-entity="switch.moen_water_shutoff_valve">Valve</button>
+  </div>
+```
+
+**Detection rules**
+- Jinja helpers: `states()`, `is_state()`, `state_attr()`, `expand()`, `device_attr()` (and similar).
+- HTML attributes: `data-entity="..."`, `entity="..."`, `ha-entity-picker` values.
+- Entity IDs match `/[a-z0-9_]+\.[a-z0-9_]+/i` and are de-duplicated and sorted.
 
 ## Examples
 
