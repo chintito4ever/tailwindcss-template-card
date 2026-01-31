@@ -690,6 +690,17 @@ export class TailwindTemplateCard extends LitElement {
             return;
           }
 
+          const actionType = actionEvent.detail.action;
+          if (actionType === 'tap' && !hasAction(currentAction.tap_action)) {
+            return;
+          }
+          if (actionType === 'hold' && !hasAction(currentAction.hold_action)) {
+            return;
+          }
+          if (actionType === 'double_tap' && !hasAction(currentAction.double_tap_action)) {
+            return;
+          }
+
           handleAction(
             this,
             this.hass,
