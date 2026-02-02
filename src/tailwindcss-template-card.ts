@@ -270,6 +270,10 @@ export class TailwindTemplateCard extends LitElement {
       }
     });
     this._resizeObserver.observe(target);
+
+    if (this._config?.debug) {
+      console.debug('Resize observer setup', { target });
+    }
   }
 
   private _notifyCardResize(): void {
