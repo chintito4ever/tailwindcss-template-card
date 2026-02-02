@@ -81,8 +81,7 @@ content: |
 | `debounceChangePeriod` | number | `100` | Debounce delay in milliseconds |
 | `auto_detect_entities` | boolean | `true` | Auto-detect entity IDs in the template |
 | `auto_bind_entity_actions` | boolean | `true` | Auto-bind entity actions to matching elements |
-| `entity_actions` | object | `{}` | Per-entity action mappings (optional selector per entity) |
-| `default_entity` | string | - | Default entity for action resolution when no data-entity is present |
+| `entity_actions` | object | `{}` | Per-entity action mappings |
 | `tap_action` | action | `more-info` | Action on tap |
 | `hold_action` | action | - | Action on hold |
 | `double_tap_action` | action | - | Action on double-tap |
@@ -173,7 +172,6 @@ to mark the clickable element, and the card will bind the action automatically w
 ```yaml
 auto_detect_entities: true
 auto_bind_entity_actions: true
-default_entity: sensor.medication_box_battery
 entity_actions:
   switch.moen_water_shutoff_valve:
     tap_action:
@@ -181,23 +179,16 @@ entity_actions:
   sensor.droplet_flow_rate:
     tap_action:
       action: more-info
-  sensor.moen_water_shutoff_water_temperature:
-    selector: ".water-temp"
-    tap_action:
-      action: more-info
 content: |
   <div class="flex items-center gap-2">
     <span data-entity="sensor.droplet_flow_rate">Flow</span>
     <button data-entity="switch.moen_water_shutoff_valve">Valve</button>
-    <span class="water-temp">Temp</span>
   </div>
 ```
 
 **Detection rules**
 - Jinja helpers: `states()`, `is_state()`, `state_attr()`, `expand()`, `device_attr()` (and similar).
 - HTML attributes: `data-entity="..."`, `entity="..."`, `ha-entity-picker` values.
-- Optional selectors: add `selector` under `entity_actions` to bind actions when you can't add `data-entity`.
-- If no `data-entity` is found, `default_entity` is used. If not set and there is exactly one `entity_actions` entry, that entity is used as a fallback.
 - Entity IDs match `/[a-z0-9_]+\.[a-z0-9_]+/i` and are de-duplicated and sorted.
 
 ## Examples
