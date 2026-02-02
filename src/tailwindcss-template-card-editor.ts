@@ -9,6 +9,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { HomeAssistant, fireEvent, LovelaceCardEditor } from 'custom-card-helpers';
 import type { TailwindTemplateCardConfig, LayoutOptions } from './types';
 import { DEFAULT_CONFIG, DAISYUI_THEMES, SECTIONS_SIZING } from './const';
+import { extractEntitiesFromContent } from './utils/entity-extractor';
 
 // Schema definitions for HA selectors
 const CONTENT_SCHEMA = [
@@ -48,6 +49,32 @@ const ACTIONS_SCHEMA = [
   {
     name: 'double_tap_action',
     selector: { 'ui-action': {} },
+  },
+];
+
+const ENTITY_ACTIONS_SCHEMA = [
+  {
+    name: 'tap_action',
+    selector: { 'ui-action': {} },
+  },
+  {
+    name: 'hold_action',
+    selector: { 'ui-action': {} },
+  },
+  {
+    name: 'double_tap_action',
+    selector: { 'ui-action': {} },
+  },
+];
+
+const ENTITY_ACTION_OPTIONS_SCHEMA = [
+  {
+    name: 'auto_detect_entities',
+    selector: { boolean: {} },
+  },
+  {
+    name: 'auto_bind_entity_actions',
+    selector: { boolean: {} },
   },
 ];
 
@@ -104,12 +131,17 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
   @property({ attribute: false }) public hass!: HomeAssistant;
   @state() private _config!: TailwindTemplateCardConfig;
   @state() private _activeTab = 'content';
+  @state() private _detectedEntities: string[] = [];
+  @state() private _lastDetectedContent?: string;
+  @state() private _lastAutoDetectSetting?: boolean;
+  @state() private _entityFilter = '';
 
   public setConfig(config: TailwindTemplateCardConfig): void {
     this._config = {
       ...DEFAULT_CONFIG,
       ...config,
     };
+    this._updateDetectedEntities();
   }
 
   private _valueChanged(ev: CustomEvent): void {
@@ -182,6 +214,85 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
     this._activeTab = tab;
   }
 
+  private _updateDetectedEntities(): void {
+    if (!this._config) {
+      return;
+    }
+
+    const autoDetect = this._config.auto_detect_entities !== false;
+    const content = this._config.content || '';
+
+    if (
+      this._lastDetectedContent === content &&
+      this._lastAutoDetectSetting === autoDetect
+    ) {
+      return;
+    }
+
+    this._lastDetectedContent = content;
+    this._lastAutoDetectSetting = autoDetect;
+    this._detectedEntities = autoDetect ? extractEntitiesFromContent(content) : [];
+  }
+
+  private _updateEntityActions(entityId: string, value: Record<string, unknown>): void {
+    const entityActions = {
+      ...(this._config.entity_actions || {}),
+      [entityId]: {
+        ...(this._config.entity_actions?.[entityId] || {}),
+        ...value,
+      },
+    };
+
+    fireEvent(this, 'config-changed', {
+      config: { ...this._config, entity_actions: entityActions },
+    });
+  }
+
+  private _applyQuickAction(entityId: string, action: Record<string, unknown>): void {
+    this._updateEntityActions(entityId, { tap_action: action });
+  }
+
+  private _applyDefaultActionToAll(): void {
+    const entityActions = { ...(this._config.entity_actions || {}) };
+    this._detectedEntities.forEach((entityId) => {
+      entityActions[entityId] = {
+        ...(entityActions[entityId] || {}),
+        tap_action: { action: 'more-info' },
+      };
+    });
+
+    fireEvent(this, 'config-changed', {
+      config: { ...this._config, entity_actions: entityActions },
+    });
+  }
+
+  private _clearActionsForAll(): void {
+    fireEvent(this, 'config-changed', {
+      config: { ...this._config, entity_actions: {} },
+    });
+  }
+
+  private _removeActionsForMissingEntities(): void {
+    const detected = new Set(this._detectedEntities);
+    const entityActions = { ...(this._config.entity_actions || {}) };
+    Object.keys(entityActions).forEach((entityId) => {
+      if (!detected.has(entityId)) {
+        delete entityActions[entityId];
+      }
+    });
+
+    fireEvent(this, 'config-changed', {
+      config: { ...this._config, entity_actions: entityActions },
+    });
+  }
+
+  protected updated(changedProperties: Map<string, unknown>): void {
+    super.updated(changedProperties);
+    if (changedProperties.has('_config')) {
+      this._updateDetectedEntities();
+    }
+  }
+
   protected render() {
     if (!this.hass || !this._config) {
       return nothing;
@@ -210,6 +321,12 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
             Actions
           </button>
           <button
+            class="tab ${this._activeTab === 'entity-actions' ? 'active' : ''}"
+            @click=${() => this._setTab('entity-actions')}
+          >
+            Entities & Actions
+          </button>
+          <button
             class="tab ${this._activeTab === 'options' ? 'active' : ''}"
             @click=${() => this._setTab('options')}
           >
@@ -228,6 +345,7 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
           ${this._activeTab === 'content' ? this._renderContentTab() : nothing}
           ${this._activeTab === 'entity' ? this._renderEntityTab() : nothing}
           ${this._activeTab === 'actions' ? this._renderActionsTab() : nothing}
+          ${this._activeTab === 'entity-actions' ? this._renderEntityActionsTab() : nothing}
           ${this._activeTab === 'options' ? this._renderOptionsTab() : nothing}
           ${this._activeTab === 'layout' ? this._renderLayoutTab() : nothing}
         </div>
@@ -325,6 +443,157 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
           <strong>Example:</strong>
           <pre>&lt;button data-ha-action="tap" data-entity="light.living_room"&gt;Toggle&lt;/button&gt;</pre>
         </div>
+      </div>
+    `;
+  }
+
+  private _renderEntityActionsTab() {
+    const filter = this._entityFilter.toLowerCase();
+    const filteredEntities = this._detectedEntities.filter((entityId) =>
+      entityId.toLowerCase().includes(filter)
+    );
+
+    const groupedEntities = filteredEntities.reduce<Record<string, string[]>>((acc, entityId) => {
+      const [domain] = entityId.split('.');
+      acc[domain] = acc[domain] || [];
+      acc[domain].push(entityId);
+      return acc;
+    }, {});
+
+    const toggleDomains = new Set([
+      'switch',
+      'light',
+      'input_boolean',
+      'fan',
+      'cover',
+      'lock',
+      'script',
+      'automation',
+    ]);
+
+    return html`
+      <div class="section">
+        <h3>Entity Detection</h3>
+        <ha-form
+          .hass=${this.hass}
+          .data=${{
+            auto_detect_entities: this._config.auto_detect_entities ?? true,
+            auto_bind_entity_actions: this._config.auto_bind_entity_actions ?? true,
+          }}
+          .schema=${ENTITY_ACTION_OPTIONS_SCHEMA}
+          .computeLabel=${(schema: any) => {
+            switch (schema.name) {
+              case 'auto_detect_entities': return 'Auto-detect entities from template';
+              case 'auto_bind_entity_actions': return 'Auto-bind entity actions';
+              default: return schema.name;
+            }
+          }}
+          .computeHelper=${(schema: any) => {
+            switch (schema.name) {
+              case 'auto_bind_entity_actions':
+                return 'Elements with data-entity will receive actions automatically.';
+              default:
+                return '';
+            }
+          }}
+          @value-changed=${this._schemaValueChanged}
+        ></ha-form>
+      </div>
+
+      <div class="section">
+        <h3>Detected Entities</h3>
+        <p class="description">
+          Detected entities from your template. Explicit <code>data-ha-action</code> overrides auto binding.
+        </p>
+        <div class="entity-actions-toolbar">
+          <input
+            class="entity-filter"
+            type="search"
+            placeholder="Filter entities..."
+            .value=${this._entityFilter}
+            @input=${(ev: Event) => { this._entityFilter = (ev.target as HTMLInputElement).value; }}
+          />
+          <div class="entity-actions-buttons">
+            <button class="button" @click=${this._applyDefaultActionToAll}>
+              Apply more-info to all
+            </button>
+            <button class="button" @click=${this._clearActionsForAll}>
+              Clear actions
+            </button>
+            <button class="button" @click=${this._removeActionsForMissingEntities}>
+              Remove missing entities
+            </button>
+          </div>
+        </div>
+
+        ${filteredEntities.length === 0
+          ? html`<p class="description">No entities detected.</p>`
+          : html`
+            <div class="entity-groups">
+              ${Object.entries(groupedEntities).map(([domain, entities]) => html`
+                <details class="entity-group" open>
+                  <summary>${domain} (${entities.length})</summary>
+                  ${entities.map((entityId) => {
+                    const stateObj = this.hass.states[entityId];
+                    const friendlyName = stateObj?.attributes?.friendly_name;
+                    const actionConfig = this._config.entity_actions?.[entityId] || {};
+                    const canToggle = toggleDomains.has(domain);
+                    return html`
+                      <div class="entity-row">
+                        <div class="entity-meta">
+                          <div class="entity-id">${entityId}</div>
+                          ${friendlyName ? html`<div class="entity-name">${friendlyName}</div>` : nothing}
+                        </div>
+                        <div class="entity-actions">
+                          <label class="selector-input">
+                            <span>Target selector (optional)</span>
+                            <input
+                              type="text"
+                              placeholder="e.g. .water-temp"
+                              .value=${actionConfig.selector || ''}
+                              @change=${(ev: Event) => this._updateEntityActions(entityId, { selector: (ev.target as HTMLInputElement).value })}
+                            />
+                          </label>
+                          <div class="quick-actions">
+                            <span class="quick-label">Quick actions:</span>
+                            <button class="chip" @click=${() => this._applyQuickAction(entityId, { action: 'more-info' })}>
+                              More info
+                            </button>
+                            ${canToggle ? html`
+                              <button class="chip" @click=${() => this._applyQuickAction(entityId, { action: 'toggle' })}>
+                                Toggle
+                              </button>
+                            ` : nothing}
+                            <button class="chip" @click=${() => this._applyQuickAction(entityId, { action: 'navigate', navigation_path: '' })}>
+                              Navigate
+                            </button>
+                            <button class="chip" @click=${() => this._applyQuickAction(entityId, { action: 'call-service', service: '' })}>
+                              Call service
+                            </button>
+                          </div>
+                          <ha-form
+                            class="entity-action-form"
+                            .hass=${this.hass}
+                            .data=${actionConfig}
+                            .schema=${ENTITY_ACTIONS_SCHEMA}
+                            .computeLabel=${(schema: any) => {
+                              switch (schema.name) {
+                                case 'tap_action': return 'Tap Action';
+                                case 'hold_action': return 'Hold Action';
+                                case 'double_tap_action': return 'Double Tap Action';
+                                default: return schema.name;
+                              }
+                            }}
+                            @value-changed=${(ev: CustomEvent) => this._updateEntityActions(entityId, ev.detail.value)}
+                          ></ha-form>
+                        </div>
+                      </div>
+                    `;
+                  })}
+                </details>
+              `)}
+            </div>
+          `}
       </div>
     `;
   }
@@ -595,6 +864,126 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
 
       .option span {
         font-size: 14px;
+      }
+
+      .entity-actions-toolbar {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .entity-actions-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .entity-filter {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--divider-color);
+        border-radius: 6px;
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+      }
+
+      .entity-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .entity-group {
+        border: 1px solid var(--divider-color);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--card-background-color);
+      }
+
+      .entity-group summary {
+        cursor: pointer;
+        font-weight: 500;
+        margin-bottom: 8px;
+      }
+
+      .entity-row {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px 0;
+        border-top: 1px solid var(--divider-color);
+      }
+
+      .entity-row:first-of-type {
+        border-top: none;
+      }
+
+      .entity-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .entity-id {
+        font-weight: 500;
+      }
+
+      .entity-name {
+        color: var(--secondary-text-color);
+        font-size: 13px;
+      }
+
+      .quick-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .quick-label {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+      }
+
+      .chip {
+        border: 1px solid var(--divider-color);
+        border-radius: 999px;
+        padding: 4px 10px;
+        background: var(--secondary-background-color);
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .button {
+        border: 1px solid var(--divider-color);
+        border-radius: 6px;
+        padding: 6px 12px;
+        background: var(--secondary-background-color);
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      .entity-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .selector-input {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--secondary-text-color);
+      }
+
+      .selector-input input {
+        padding: 8px 10px;
+        border: 1px solid var(--divider-color);
+        border-radius: 6px;
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
       }
 
       .option input[type="number"] {
