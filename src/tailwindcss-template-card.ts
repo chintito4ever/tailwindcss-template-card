@@ -252,7 +252,8 @@ export class TailwindTemplateCard extends LitElement {
 
     const target =
       this.shadowRoot.querySelector('ha-card') ??
-      this.shadowRoot.querySelector('.content');
+      this.shadowRoot.querySelector('.content') ??
+      this.shadowRoot.getElementById('root');
 
     if (!target) {
       return;
@@ -264,7 +265,9 @@ export class TailwindTemplateCard extends LitElement {
 
     this._resizeObserverTarget = target;
     this._resizeObserver = new ResizeObserver(() => {
-      this._notifyCardResize();
+      if (typeof this._notifyCardResize === 'function') {
+        this._notifyCardResize();
+      }
     });
     this._resizeObserver.observe(target);
 
@@ -508,8 +511,12 @@ export class TailwindTemplateCard extends LitElement {
       this._setupActionHandlers();
       this._setupEntityActionBindings();
       this._applyHassToContent();
-      this._setupResizeObserver();
-      this._notifyCardResize();
+      if (typeof this._setupResizeObserver === 'function') {
+        this._setupResizeObserver();
+      }
+      if (typeof this._notifyCardResize === 'function') {
+        this._notifyCardResize();
+      }
     }
 
     if (changedProperties.has('_config') || changedProperties.has('hass')) {
@@ -530,14 +537,9 @@ export class TailwindTemplateCard extends LitElement {
     super.firstUpdated();
     if (typeof this._setupResizeObserver === 'function') {
       this._setupResizeObserver();
-    } else if (this._config?.debug) {
-      console.warn('Resize observer setup method missing');
     }
-
     if (typeof this._notifyCardResize === 'function') {
       this._notifyCardResize();
-    } else if (this._config?.debug) {
-      console.warn('Resize notification method missing');
     }
   }
 
