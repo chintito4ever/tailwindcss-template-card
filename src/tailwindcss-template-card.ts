@@ -242,17 +242,18 @@ export class TailwindTemplateCard extends LitElement {
   }
 
   private _setupResizeObserver(): void {
-    if (typeof ResizeObserver === 'undefined') {
+    if (!this.shadowRoot) {
       return;
     }
 
-    if (!this.shadowRoot) {
+    if (typeof ResizeObserver === 'undefined') {
       return;
     }
 
     const target =
       this.shadowRoot.querySelector('ha-card') ??
-      this.shadowRoot.querySelector('.content');
+      this.shadowRoot.querySelector('.content') ??
+      this.shadowRoot.getElementById('root');
 
     if (!target) {
       return;
@@ -264,7 +265,9 @@ export class TailwindTemplateCard extends LitElement {
 
     this._resizeObserverTarget = target;
     this._resizeObserver = new ResizeObserver(() => {
-      this._notifyCardResize();
+      if (typeof (this as any)._notifyCardResize === 'function') {
+        this._notifyCardResize();
+      }
     });
     this._resizeObserver.observe(target);
 
@@ -508,7 +511,12 @@ export class TailwindTemplateCard extends LitElement {
       this._setupActionHandlers();
       this._setupEntityActionBindings();
       this._applyHassToContent();
-      this._notifyCardResize();
+      if (typeof (this as any)._setupResizeObserver === 'function') {
+        this._setupResizeObserver();
+      }
+      if (typeof (this as any)._notifyCardResize === 'function') {
+        this._notifyCardResize();
+      }
     }
 
     if (changedProperties.has('_config') || changedProperties.has('hass')) {
@@ -527,8 +535,12 @@ export class TailwindTemplateCard extends LitElement {
 
   protected firstUpdated(): void {
     super.firstUpdated();
-    this._setupResizeObserver();
-    this._notifyCardResize();
+    if (typeof (this as any)._setupResizeObserver === 'function') {
+      this._setupResizeObserver();
+    }
+    if (typeof (this as any)._notifyCardResize === 'function') {
+      this._notifyCardResize();
+    }
   }
 
   /**
