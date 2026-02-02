@@ -511,13 +511,11 @@ export class TailwindTemplateCard extends LitElement {
       this._setupActionHandlers();
       this._setupEntityActionBindings();
       this._applyHassToContent();
-      const setupResizeObserver = (this as any)._setupResizeObserver;
-      if (typeof setupResizeObserver === 'function') {
-        setupResizeObserver.call(this);
+      if (typeof (this as any)._setupResizeObserver === 'function') {
+        this._setupResizeObserver();
       }
-      const notifyCardResize = (this as any)._notifyCardResize;
-      if (typeof notifyCardResize === 'function') {
-        notifyCardResize.call(this);
+      if (typeof (this as any)._notifyCardResize === 'function') {
+        this._notifyCardResize();
       }
     }
 
@@ -537,13 +535,11 @@ export class TailwindTemplateCard extends LitElement {
 
   protected firstUpdated(): void {
     super.firstUpdated();
-    const setupResizeObserver = (this as any)._setupResizeObserver;
-    if (typeof setupResizeObserver === 'function') {
-      setupResizeObserver.call(this);
+    if (typeof (this as any)._setupResizeObserver === 'function') {
+      this._setupResizeObserver();
     }
-    const notifyCardResize = (this as any)._notifyCardResize;
-    if (typeof notifyCardResize === 'function') {
-      notifyCardResize.call(this);
+    if (typeof (this as any)._notifyCardResize === 'function') {
+      this._notifyCardResize();
     }
   }
 
