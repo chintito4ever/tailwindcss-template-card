@@ -143,6 +143,26 @@ export interface TailwindTemplateCardConfig extends LovelaceCardConfig {
   
   /** Camera options */
   camera?: CameraOptions;
+
+  /** Enable debug logging for action resolution */
+  debug?: boolean;
+
+  /** Default entity for action resolution when none found in DOM */
+  default_entity?: string;
+
+  /** Auto-detect entities from content */
+  auto_detect_entities?: boolean;
+
+  /** Auto-bind entity action mappings to matching elements */
+  auto_bind_entity_actions?: boolean;
+
+  /** Per-entity action mappings */
+  entity_actions?: Record<string, {
+    tap_action?: ActionConfig;
+    hold_action?: ActionConfig;
+    double_tap_action?: ActionConfig;
+    selector?: string;
+  }>;
   
   // Standard HA actions
   tap_action?: ActionConfig;
