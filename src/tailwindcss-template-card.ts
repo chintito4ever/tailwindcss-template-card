@@ -241,24 +241,54 @@ export class TailwindTemplateCard extends LitElement {
     this._detectedEntities = autoDetect ? extractEntitiesFromContent(content) : [];
   }
 
-  private _updateDetectedEntities(): void {
-    if (!this._config) {
+  private _setupResizeObserver(): void {
+    if (typeof ResizeObserver === 'undefined') {
       return;
     }
 
-    const autoDetect = this._config.auto_detect_entities !== false;
-    const content = this._config.content || '';
-
-    if (
-      this._lastDetectedContent === content &&
-      this._lastAutoDetectSetting === autoDetect
-    ) {
+    if (!this.shadowRoot) {
       return;
     }
 
-    this._lastDetectedContent = content;
-    this._lastAutoDetectSetting = autoDetect;
-    this._detectedEntities = autoDetect ? extractEntitiesFromContent(content) : [];
+    const target =
+      this.shadowRoot.querySelector('ha-card') ??
+      this.shadowRoot.querySelector('.content');
+
+    if (!target) {
+      return;
+    }
+
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+    }
+
+    this._resizeObserverTarget = target;
+    this._resizeObserver = new ResizeObserver(() => {
+      this._notifyCardResize();
+    });
+    this._resizeObserver.observe(target);
+  }
+
+  private _notifyCardResize(): void {
+    if (!this.isConnected || !this.shadowRoot) {
+      return;
+    }
+
+    if (!this.shadowRoot.querySelector('ha-card')) {
+      return;
+    }
+
+    if (this._resizeNotifyFrame) {
+      return;
+    }
+
+    this._resizeNotifyFrame = requestAnimationFrame(() => {
+      this._resizeNotifyFrame = undefined;
+      if (!this.isConnected) {
+        return;
+      }
+      this.dispatchEvent(new Event('card-resize', { bubbles: true, composed: true }));
+    });
   }
 
   /**
@@ -879,126 +909,6 @@ export class TailwindTemplateCard extends LitElement {
       }
     }
 
-    if (element.getAttribute('data-auto-entity') === 'true') {
-      element.removeAttribute('data-entity');
-      element.removeAttribute('data-auto-entity');
-    }
-  }
-
-  private _setupEntityActionBindings(): void {
-    if (!this.shadowRoot || !this.hass || !this._config) {
-      return;
-    }
-
-    const container = this.shadowRoot.querySelector('.content');
-    if (!container) return;
-
-    if (this._config.auto_bind_entity_actions === false) {
-      container
-        .querySelectorAll<HTMLElement>('[data-auto-entity-action]')
-        .forEach((element) => this._removeAutoEntityAction(element));
-      return;
-    }
-
-    const entityActions = this._config.entity_actions || {};
-    const actionElements = container.querySelectorAll<HTMLElement>('[data-entity]');
-
-    actionElements.forEach((element) => {
-      if (element.hasAttribute('data-ha-action')) {
-        this._removeAutoEntityAction(element);
-        return;
-      }
-
-      const entityId = element.getAttribute('data-entity');
-      if (!entityId) {
-        this._removeAutoEntityAction(element);
-        return;
-      }
-
-      const actionConfig = entityActions[entityId];
-      const hasTap = hasAction(actionConfig?.tap_action);
-      const hasHold = hasAction(actionConfig?.hold_action);
-      const hasDoubleClick = hasAction(actionConfig?.double_tap_action);
-      const hasAnyAction = hasTap || hasHold || hasDoubleClick;
-
-      if (!hasAnyAction) {
-        this._removeAutoEntityAction(element);
-        return;
-      }
-
-      this._applyAutoEntityAttributes(element);
-      setActionHandler(element, { hasHold, hasDoubleClick });
-
-      if (!this._entityActionListeners.has(element)) {
-        const listener = (ev: Event): void => {
-          const actionEvent = ev as ActionHandlerEvent;
-          actionEvent.stopPropagation();
-          const currentEntityId = element.getAttribute('data-entity');
-          if (!currentEntityId || !this.hass || !this._config) {
-            return;
-          }
-          const currentAction = this._config.entity_actions?.[currentEntityId];
-          if (!currentAction) {
-            return;
-          }
-
-          const actionType = actionEvent.detail.action;
-          if (actionType === 'tap' && !hasAction(currentAction.tap_action)) {
-            return;
-          }
-          if (actionType === 'hold' && !hasAction(currentAction.hold_action)) {
-            return;
-          }
-          if (actionType === 'double_tap' && !hasAction(currentAction.double_tap_action)) {
-            return;
-          }
-
-          handleAction(
-            this,
-            this.hass,
-            {
-              entity: currentEntityId,
-              tap_action: currentAction.tap_action,
-              hold_action: currentAction.hold_action,
-              double_tap_action: currentAction.double_tap_action,
-            },
-            actionEvent.detail.action!
-          );
-        };
-        element.addEventListener('action', listener);
-        this._entityActionListeners.set(element, listener);
-      }
-    });
-  }
-
-  private _applyAutoEntityAttributes(element: HTMLElement): void {
-    element.classList.add('auto-entity-action');
-    element.setAttribute('data-auto-entity-action', 'true');
-    if (!element.hasAttribute('role')) {
-      element.setAttribute('role', 'button');
-      element.setAttribute('data-auto-entity-role', 'true');
-    }
-    if (!element.hasAttribute('tabindex')) {
-      element.setAttribute('tabindex', '0');
-      element.setAttribute('data-auto-entity-tabindex', 'true');
-    }
-  }
-
-  private _removeAutoEntityAction(element: HTMLElement): void {
-    if (element.hasAttribute('data-auto-entity-action')) {
-      element.classList.remove('auto-entity-action');
-      element.removeAttribute('data-auto-entity-action');
-
-      if (element.hasAttribute('data-auto-entity-role')) {
-        element.removeAttribute('role');
-        element.removeAttribute('data-auto-entity-role');
-      }
-      if (element.hasAttribute('data-auto-entity-tabindex')) {
-        element.removeAttribute('tabindex');
-        element.removeAttribute('data-auto-entity-tabindex');
-      }
-    }
-
     const listener = this._entityActionListeners.get(element);
     if (listener) {
       element.removeEventListener('action', listener);
@@ -1006,6 +916,11 @@ export class TailwindTemplateCard extends LitElement {
     }
 
     removeActionHandler(element);
+
+    if (element.getAttribute('data-auto-entity') === 'true') {
+      element.removeAttribute('data-entity');
+      element.removeAttribute('data-auto-entity');
+    }
   }
 
   private _setupCardActions(): void {
