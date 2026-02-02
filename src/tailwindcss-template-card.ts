@@ -252,8 +252,7 @@ export class TailwindTemplateCard extends LitElement {
 
     const target =
       this.shadowRoot.querySelector('ha-card') ??
-      this.shadowRoot.querySelector('.content') ??
-      this.shadowRoot.getElementById('root');
+      this.shadowRoot.querySelector('.content');
 
     if (!target) {
       return;
@@ -265,9 +264,7 @@ export class TailwindTemplateCard extends LitElement {
 
     this._resizeObserverTarget = target;
     this._resizeObserver = new ResizeObserver(() => {
-      if (typeof this._notifyCardResize === 'function') {
-        this._notifyCardResize();
-      }
+      this._notifyCardResize();
     });
     this._resizeObserver.observe(target);
 
@@ -511,12 +508,7 @@ export class TailwindTemplateCard extends LitElement {
       this._setupActionHandlers();
       this._setupEntityActionBindings();
       this._applyHassToContent();
-      if (typeof this._setupResizeObserver === 'function') {
-        this._setupResizeObserver();
-      }
-      if (typeof this._notifyCardResize === 'function') {
-        this._notifyCardResize();
-      }
+      this._notifyCardResize();
     }
 
     if (changedProperties.has('_config') || changedProperties.has('hass')) {
@@ -535,12 +527,8 @@ export class TailwindTemplateCard extends LitElement {
 
   protected firstUpdated(): void {
     super.firstUpdated();
-    if (typeof this._setupResizeObserver === 'function') {
-      this._setupResizeObserver();
-    }
-    if (typeof this._notifyCardResize === 'function') {
-      this._notifyCardResize();
-    }
+    this._setupResizeObserver();
+    this._notifyCardResize();
   }
 
   /**
