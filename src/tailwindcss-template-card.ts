@@ -90,6 +90,10 @@ export class TailwindTemplateCard extends LitElement {
   // Debounce timeout for rendering
   private _renderDebounceTimeout?: number;
 
+  private _resizeObserver?: ResizeObserver;
+  private _resizeObserverTarget?: Element;
+  private _resizeNotifyFrame?: number;
+
   private _actionTarget?: HTMLElement;
   private _actionListener?: (ev: Event) => void;
   private _entityActionListeners = new WeakMap<HTMLElement, (ev: Event) => void>();
@@ -178,6 +182,17 @@ export class TailwindTemplateCard extends LitElement {
     if (this._renderDebounceTimeout) {
       clearTimeout(this._renderDebounceTimeout);
       this._renderDebounceTimeout = undefined;
+    }
+
+    if (this._resizeNotifyFrame) {
+      cancelAnimationFrame(this._resizeNotifyFrame);
+      this._resizeNotifyFrame = undefined;
+    }
+
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = undefined;
+      this._resizeObserverTarget = undefined;
     }
 
     if (this._actionTarget) {
@@ -459,6 +474,7 @@ export class TailwindTemplateCard extends LitElement {
       this._setupActionHandlers();
       this._setupEntityActionBindings();
       this._applyHassToContent();
+      this._notifyCardResize();
     }
 
     if (changedProperties.has('_config') || changedProperties.has('hass')) {
@@ -473,6 +489,12 @@ export class TailwindTemplateCard extends LitElement {
     if (changedProperties.has('_config') || changedProperties.has('hass')) {
       this._setupCardActions();
     }
+  }
+
+  protected firstUpdated(): void {
+    super.firstUpdated();
+    this._setupResizeObserver();
+    this._notifyCardResize();
   }
 
   /**
@@ -1116,6 +1138,13 @@ export class TailwindTemplateCard extends LitElement {
    * Get card size for layout calculations
    */
   public getCardSize(): number {
+    const card = this.shadowRoot?.querySelector('ha-card') as HTMLElement | null;
+    if (card) {
+      const height = card.offsetHeight;
+      if (height > 0) {
+        return Math.max(1, Math.ceil(height / 50));
+      }
+    }
     return this._config?.card_size || 3;
   }
 
@@ -1162,6 +1191,7 @@ export class TailwindTemplateCard extends LitElement {
       ha-card {
         height: 100%;
         overflow: hidden;
+        display: block;
       }
       .content {
         padding: var(--spacing, 0);
