@@ -545,15 +545,6 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
                           ${friendlyName ? html`<div class="entity-name">${friendlyName}</div>` : nothing}
                         </div>
                         <div class="entity-actions">
-                          <label class="selector-input">
-                            <span>Target selector (optional)</span>
-                            <input
-                              type="text"
-                              placeholder="e.g. .water-temp"
-                              .value=${actionConfig.selector || ''}
-                              @change=${(ev: Event) => this._updateEntityActions(entityId, { selector: (ev.target as HTMLInputElement).value })}
-                            />
-                          </label>
                           <div class="quick-actions">
                             <span class="quick-label">Quick actions:</span>
                             <button class="chip" @click=${() => this._applyQuickAction(entityId, { action: 'more-info' })}>
@@ -968,22 +959,6 @@ export class TailwindTemplateCardEditor extends LitElement implements LovelaceCa
         display: flex;
         flex-direction: column;
         gap: 12px;
-      }
-
-      .selector-input {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        font-size: 12px;
-        color: var(--secondary-text-color);
-      }
-
-      .selector-input input {
-        padding: 8px 10px;
-        border: 1px solid var(--divider-color);
-        border-radius: 6px;
-        background: var(--card-background-color);
-        color: var(--primary-text-color);
       }
 
       .option input[type="number"] {
