@@ -68,8 +68,6 @@ export const DEFAULT_CONFIG: Partial<TailwindTemplateCardConfig> = {
     fallback_hls: true,
     show_controls: true,
   },
-  debug: false,
-  default_entity: undefined,
   auto_detect_entities: true,
   auto_bind_entity_actions: true,
   entity_actions: {},
