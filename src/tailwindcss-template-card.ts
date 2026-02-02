@@ -267,6 +267,10 @@ export class TailwindTemplateCard extends LitElement {
       this._notifyCardResize();
     });
     this._resizeObserver.observe(target);
+
+    if (this._config?.debug) {
+      console.debug('Resize observer setup', { target });
+    }
   }
 
   private _notifyCardResize(): void {
@@ -504,6 +508,7 @@ export class TailwindTemplateCard extends LitElement {
       this._setupActionHandlers();
       this._setupEntityActionBindings();
       this._applyHassToContent();
+      this._setupResizeObserver();
       this._notifyCardResize();
     }
 
@@ -523,8 +528,17 @@ export class TailwindTemplateCard extends LitElement {
 
   protected firstUpdated(): void {
     super.firstUpdated();
-    this._setupResizeObserver();
-    this._notifyCardResize();
+    if (typeof this._setupResizeObserver === 'function') {
+      this._setupResizeObserver();
+    } else if (this._config?.debug) {
+      console.warn('Resize observer setup method missing');
+    }
+
+    if (typeof this._notifyCardResize === 'function') {
+      this._notifyCardResize();
+    } else if (this._config?.debug) {
+      console.warn('Resize notification method missing');
+    }
   }
 
   /**
