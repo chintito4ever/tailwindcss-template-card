@@ -93,6 +93,7 @@ export class TailwindTemplateCard extends LitElement {
   private _resizeObserver?: ResizeObserver;
   private _resizeObserverTarget?: Element;
   private _resizeNotifyFrame?: number;
+  private _resizeNotifyTimeout?: number;
 
   private _actionTarget?: HTMLElement;
   private _actionListener?: (ev: Event) => void;
@@ -188,6 +189,10 @@ export class TailwindTemplateCard extends LitElement {
       cancelAnimationFrame(this._resizeNotifyFrame);
       this._resizeNotifyFrame = undefined;
     }
+    if (this._resizeNotifyTimeout) {
+      clearTimeout(this._resizeNotifyTimeout);
+      this._resizeNotifyTimeout = undefined;
+    }
 
     if (this._resizeObserver) {
       this._resizeObserver.disconnect();
@@ -250,10 +255,7 @@ export class TailwindTemplateCard extends LitElement {
       return;
     }
 
-    const target =
-      this.shadowRoot.querySelector('ha-card') ??
-      this.shadowRoot.querySelector('.content') ??
-      this.shadowRoot.getElementById('root');
+    const target = this.shadowRoot.querySelector('ha-card');
 
     if (!target) {
       return;
@@ -264,11 +266,13 @@ export class TailwindTemplateCard extends LitElement {
     }
 
     this._resizeObserverTarget = target;
-    this._resizeObserver = new ResizeObserver(() => {
-      if (typeof (this as any)._notifyCardResize === 'function') {
-        this._notifyCardResize();
-      }
-    });
+    if (!this._resizeObserver) {
+      this._resizeObserver = new ResizeObserver(() => {
+        if (typeof (this as any)._notifyCardResize === 'function') {
+          this._notifyCardResize();
+        }
+      });
+    }
     this._resizeObserver.observe(target);
 
     if (this._config?.debug) {
@@ -286,16 +290,28 @@ export class TailwindTemplateCard extends LitElement {
     }
 
     if (this._resizeNotifyFrame) {
-      return;
+      cancelAnimationFrame(this._resizeNotifyFrame);
+    }
+    if (this._resizeNotifyTimeout) {
+      clearTimeout(this._resizeNotifyTimeout);
     }
 
-    this._resizeNotifyFrame = requestAnimationFrame(() => {
-      this._resizeNotifyFrame = undefined;
+    const dispatchResize = () => {
       if (!this.isConnected) {
         return;
       }
       this.dispatchEvent(new Event('card-resize', { bubbles: true, composed: true }));
+    };
+
+    this._resizeNotifyFrame = requestAnimationFrame(() => {
+      this._resizeNotifyFrame = undefined;
+      dispatchResize();
     });
+
+    this._resizeNotifyTimeout = window.setTimeout(() => {
+      this._resizeNotifyTimeout = undefined;
+      dispatchResize();
+    }, 200);
   }
 
   /**
@@ -1103,10 +1119,9 @@ export class TailwindTemplateCard extends LitElement {
 
     return html`
       <ha-card id="root" tabindex=${hasCardAction ? '0' : nothing}>
-        <div
-          class="content"
-          .innerHTML=${this._renderedContent}
-        ></div>
+        <div class="content">
+          <div class="content-inner" .innerHTML=${this._renderedContent}></div>
+        </div>
       </ha-card>
     `;
   }
@@ -1123,9 +1138,16 @@ export class TailwindTemplateCard extends LitElement {
         height: 100%;
         overflow: hidden;
         display: block;
+        position: relative;
       }
       .content {
         padding: var(--spacing, 0);
+        display: flow-root;
+        overflow: hidden;
+        position: relative;
+      }
+      .content-inner {
+        position: relative;
       }
       .content .auto-entity-action {
         cursor: pointer;
